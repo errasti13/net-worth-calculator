@@ -102,46 +102,58 @@ class CurrencyConverter:
             return fallback_rates.get(f"{from_currency}_{to_currency}", 1.0)
 
 class MultiCurrencyNetWorthAnalyzer:
-    def __init__(self, data_path, currency_config):
-        self.data_path = data_path
+    def __init__(self, data_source, currency_config, is_file_upload=False):
+        self.data_source = data_source  # Can be file path or uploaded file
         self.currency_config = currency_config  # Dict mapping column names to currencies
         self.base_currency = "EUR"
         self.df = None
         self.df_original = None  # Store original data
         self.converter = CurrencyConverter()
+        self.is_file_upload = is_file_upload
         self.load_data()
     
     def load_data(self):
         """Load and process the multi-currency net worth data"""
         try:
-            if os.path.exists(self.data_path):
-                # Load original data
-                self.df_original = pd.read_csv(self.data_path)
-                self.df_original['Date'] = pd.to_datetime(self.df_original['Date'])
-                self.df_original = self.df_original.sort_values('Date')
-                
-                # Create a copy for conversion
-                self.df = self.df_original.copy()
-                
-                # Convert all currencies to EUR
-                self.convert_currencies_to_eur()
-                
-                # Calculate net worth for each month
-                account_columns = [col for col in self.df.columns if col not in ['Date']]
-                
-                # All columns are assets in this case (no debts specified)
-                self.df['Total Assets'] = self.df[account_columns].sum(axis=1)
-                self.df['Total Debts'] = 0  # No debt columns specified
-                self.df['Net Worth'] = self.df['Total Assets'] - self.df['Total Debts']
-                
-                # Calculate monthly changes
-                self.df['Net Worth Change'] = self.df['Net Worth'].diff()
-                self.df['Assets Change'] = self.df['Total Assets'].diff()
-                
-                return True
+            if self.is_file_upload:
+                # Handle uploaded file
+                if self.data_source is not None:
+                    # Load original data from uploaded file
+                    self.df_original = pd.read_csv(self.data_source)
+                    self.df_original['Date'] = pd.to_datetime(self.df_original['Date'])
+                    self.df_original = self.df_original.sort_values('Date')
+                else:
+                    return False
             else:
-                st.error(f"Data file not found: {self.data_path}")
-                return False
+                # Handle file path
+                if os.path.exists(self.data_source):
+                    # Load original data
+                    self.df_original = pd.read_csv(self.data_source)
+                    self.df_original['Date'] = pd.to_datetime(self.df_original['Date'])
+                    self.df_original = self.df_original.sort_values('Date')
+                else:
+                    st.error(f"Data file not found: {self.data_source}")
+                    return False
+            
+            # Create a copy for conversion
+            self.df = self.df_original.copy()
+            
+            # Convert all currencies to EUR
+            self.convert_currencies_to_eur()
+            
+            # Calculate net worth for each month
+            account_columns = [col for col in self.df.columns if col not in ['Date']]
+            
+            # All columns are assets in this case (no debts specified)
+            self.df['Total Assets'] = self.df[account_columns].sum(axis=1)
+            self.df['Total Debts'] = 0  # No debt columns specified
+            self.df['Net Worth'] = self.df['Total Assets'] - self.df['Total Debts']
+            
+            # Calculate monthly changes
+            self.df['Net Worth Change'] = self.df['Net Worth'].diff()
+            self.df['Assets Change'] = self.df['Total Assets'].diff()
+            
+            return True
         except Exception as e:
             st.error(f"Error loading data: {str(e)}")
             return False
@@ -341,19 +353,107 @@ def main():
     # Header
     st.markdown('<h1 class="main-header">💰 Multi-Currency Net Worth Tracker</h1>', unsafe_allow_html=True)
     
-    # Currency configuration - you can modify this based on your accounts
-    currency_config = {
-        'UBS Account': 'CHF',
-        'IBKR Account': 'CHF', 
-        'Kutxabank Account': 'EUR'
-    }
+    # File upload section
+    st.markdown("### 📁 Data Source")
     
-    # Initialize analyzer
-    data_path = "data/net_worth_data.csv"
-    analyzer = MultiCurrencyNetWorthAnalyzer(data_path, currency_config)
+    # Create tabs for different data input methods
+    tab1, tab2 = st.tabs(["📤 Upload CSV File", "📂 Use Local File"])
     
-    if analyzer.df is None:
-        st.error("Unable to load data. Please check if the data file exists.")
+    analyzer = None
+    
+    with tab1:
+        st.markdown("Upload your CSV file containing net worth data:")
+        uploaded_file = st.file_uploader(
+            "Choose a CSV file",
+            type="csv",
+            help="Upload a CSV file with Date column and account balances"
+        )
+        
+        if uploaded_file is not None:
+            # Display file info
+            st.success(f"✅ File uploaded: {uploaded_file.name}")
+            
+            # Preview the data
+            try:
+                preview_df = pd.read_csv(uploaded_file)
+                st.markdown("**📊 Data Preview:**")
+                st.dataframe(preview_df.head(), use_container_width=True)
+                
+                # Reset file pointer for actual use
+                uploaded_file.seek(0)
+                
+                # Currency configuration based on detected columns
+                st.markdown("### 💱 Currency Configuration")
+                st.markdown("Configure the currency for each account:")
+                
+                account_columns = [col for col in preview_df.columns if col.lower() != 'date']
+                currency_config = {}
+                
+                # Create currency selectors
+                col1, col2 = st.columns(2)
+                for i, account in enumerate(account_columns):
+                    with col1 if i % 2 == 0 else col2:
+                        currency_config[account] = st.selectbox(
+                            f"Currency for {account}",
+                            ["EUR", "CHF", "USD", "GBP", "JPY", "CAD", "AUD"],
+                            key=f"currency_{account}",
+                            index=1 if "UBS" in account or "IBKR" in account else 0
+                        )
+                
+                # Initialize analyzer with uploaded file
+                analyzer = MultiCurrencyNetWorthAnalyzer(uploaded_file, currency_config, is_file_upload=True)
+                
+            except Exception as e:
+                st.error(f"Error reading file: {str(e)}")
+                st.info("Please ensure your CSV file has the correct format with Date column and account balances.")
+    
+    with tab2:
+        st.markdown("Use a local file (for development/testing):")
+        
+        # Default currency configuration
+        default_currency_config = {
+            'UBS Account': 'CHF',
+            'IBKR Account': 'CHF', 
+            'Kutxabank Account': 'EUR'
+        }
+        
+        # Check if default file exists
+        default_data_path = "data/net_worth_data.csv"
+        if os.path.exists(default_data_path):
+            st.info(f"✅ Using local file: {default_data_path}")
+            analyzer = MultiCurrencyNetWorthAnalyzer(default_data_path, default_currency_config, is_file_upload=False)
+        else:
+            st.warning(f"⚠️ Local file not found: {default_data_path}")
+            st.markdown("""
+            **To use local file:**
+            1. Create a `data` folder in your project directory
+            2. Add `net_worth_data.csv` file with your data
+            3. Refresh this page
+            """)
+    
+    # Only proceed if we have a valid analyzer
+    if analyzer is None or analyzer.df is None:
+        st.info("👆 Please upload a CSV file or ensure local data file exists to continue.")
+        
+        # Show expected CSV format
+        st.markdown("### 📋 Expected CSV Format")
+        st.markdown("Your CSV file should have the following structure:")
+        
+        sample_data = {
+            'Date': ['2024-10-31', '2024-11-30', '2024-12-31'],
+            'Account 1': [1000.00, 1050.00, 1100.00],
+            'Account 2': [5000.00, 5200.00, 5400.00],
+            'Account 3': [2000.00, 2100.00, 2150.00]
+        }
+        sample_df = pd.DataFrame(sample_data)
+        st.dataframe(sample_df, use_container_width=True)
+        
+        st.markdown("""
+        **Requirements:**
+        - `Date` column in YYYY-MM-DD format (last day of month)
+        - Account columns with numeric values
+        - Monthly data points
+        """)
         return
     
     # Currency conversion info
@@ -432,7 +532,7 @@ def main():
         col1, col2 = st.columns(2)
         
         with col1:
-            st.plotly_chart(create_assets_breakdown_chart(analyzer.df, currency_config), use_container_width=True)
+            st.plotly_chart(create_assets_breakdown_chart(analyzer.df, analyzer.currency_config), use_container_width=True)
         
         with col2:
             st.subheader("📋 Recent Performance")
@@ -497,7 +597,7 @@ def main():
         st.header("📊 Individual Account Trends")
         
         # Create comparison chart
-        st.plotly_chart(create_account_trends_chart(analyzer.df, analyzer.df_original, currency_config), use_container_width=True)
+        st.plotly_chart(create_account_trends_chart(analyzer.df, analyzer.df_original, analyzer.currency_config), use_container_width=True)
         
         # Account performance table
         st.subheader("📈 Account Performance Summary (EUR)")
@@ -510,7 +610,7 @@ def main():
             end_value = analyzer.df[account].iloc[-1]
             change = end_value - start_value
             change_pct = (change / abs(start_value)) * 100 if start_value != 0 else 0
-            currency = currency_config.get(account, "EUR")
+            currency = analyzer.currency_config.get(account, "EUR")
             
             performance_data.append({
                 'Account': f"{account} ({currency}→EUR)",
@@ -557,7 +657,7 @@ def main():
             if show_converted or col in ['Net Worth', 'Total Assets', 'Total Debts', 'Net Worth Change', 'Assets Change']:
                 display_df_formatted[col] = display_df_formatted[col].apply(lambda x: f"€{x:,.2f}")
             else:
-                currency = currency_config.get(col, "EUR")
+                currency = analyzer.currency_config.get(col, "EUR")
                 display_df_formatted[col] = display_df_formatted[col].apply(lambda x: f"{x:,.2f} {currency}")
         
         st.dataframe(display_df_formatted, hide_index=True, use_container_width=True)
@@ -571,7 +671,7 @@ def main():
             
             original_formatted['Date'] = original_formatted['Date'].dt.strftime('%Y-%m-%d')
             for col in [c for c in original_formatted.columns if c != 'Date']:
-                currency = currency_config.get(col, "EUR")
+                currency = analyzer.currency_config.get(col, "EUR")
                 original_formatted[col] = original_formatted[col].apply(lambda x: f"{x:,.2f} {currency}")
             
             st.dataframe(original_formatted, hide_index=True, use_container_width=True)
@@ -608,7 +708,7 @@ def main():
         st.subheader("📊 Current Configuration")
         config_df = pd.DataFrame([
             {'Account': account, 'Currency': currency}
-            for account, currency in currency_config.items()
+            for account, currency in analyzer.currency_config.items()
         ])
         st.dataframe(config_df, hide_index=True, use_container_width=True)
         
