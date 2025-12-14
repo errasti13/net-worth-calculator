@@ -1,16 +1,25 @@
 # Net Worth Tracker
 
-A comprehensive Streamlit application for tracking personal net worth over time.
+A comprehensive Streamlit application for tracking personal net worth across multiple currencies with real-time exchange rates.
+
+[![Open in Streamlit](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://share.streamlit.io/errasti13/net-worth-calculator/main/app.py)
 
 ## Features
 
-- **📈 Interactive Dashboard**: Visual representation of net worth trends with monthly changes
-- **💰 Asset Allocation**: Pie chart showing current asset distribution
-- **📊 Detailed Analysis**: Filter data by time periods and view detailed statistics
-- **📋 Account Trends**: Track individual accounts over time
-- **📥 Data Export**: Download your data as CSV
+- **💰 Multi-Currency Support**: Automatically detect currencies from CSV headers (CHF, EUR, USD, etc.)
+- **📈 Real-Time Exchange Rates**: Uses Yahoo Finance API for current conversion rates
+- **📊 Interactive Dashboard**: Visual representation of net worth trends with monthly changes
+- **🥧 Asset Allocation**: Pie chart showing current asset distribution across accounts
+- **� Detailed Analysis**: Filter data by time periods and view comprehensive statistics
+- **📋 Account Trends**: Track individual accounts over time in original and converted currencies
+- **📥 Data Export**: Download your data as CSV in both original and EUR formats
 
 ## Quick Start
+
+### 🚀 Try it Online
+Click the "Open in Streamlit" badge above to try the app instantly!
+
+### 💻 Local Installation
 
 1. **Install Dependencies**:
    ```bash
