@@ -102,15 +102,48 @@ class CurrencyConverter:
             return fallback_rates.get(f"{from_currency}_{to_currency}", 1.0)
 
 class MultiCurrencyNetWorthAnalyzer:
-    def __init__(self, data_source, currency_config, is_file_upload=False):
+    def __init__(self, data_source, is_file_upload=False):
         self.data_source = data_source  # Can be file path or uploaded file
-        self.currency_config = currency_config  # Dict mapping column names to currencies
+        self.currency_config = {}  # Will be automatically parsed from headers
         self.base_currency = "EUR"
         self.df = None
         self.df_original = None  # Store original data
         self.converter = CurrencyConverter()
         self.is_file_upload = is_file_upload
         self.load_data()
+    
+    def extract_currency_from_header(self, column_name):
+        """Extract currency from column header like 'Account Name (CHF)' or 'Account Name CHF'"""
+        import re
+        
+        # Pattern to match currency codes in parentheses or at the end
+        patterns = [
+            r'\(([A-Z]{3})\)',  # Match (CHF), (EUR), etc.
+            r'\s([A-Z]{3})$',   # Match CHF, EUR at the end
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, column_name)
+            if match:
+                currency = match.group(1)
+                # Validate it's a known currency
+                known_currencies = ['EUR', 'CHF', 'USD', 'GBP', 'JPY', 'CAD', 'AUD', 'SEK', 'NOK', 'DKK']
+                if currency in known_currencies:
+                    return currency
+        
+        # Default to EUR if no currency found
+        return "EUR"
+    
+    def parse_currency_config_from_headers(self, columns):
+        """Parse currency configuration from CSV headers"""
+        config = {}
+        
+        for col in columns:
+            if col.lower() != 'date':
+                currency = self.extract_currency_from_header(col)
+                config[col] = currency
+        
+        return config
     
     def load_data(self):
         """Load and process the multi-currency net worth data"""
@@ -134,6 +167,9 @@ class MultiCurrencyNetWorthAnalyzer:
                 else:
                     st.error(f"Data file not found: {self.data_source}")
                     return False
+            
+            # Parse currency configuration from headers
+            self.currency_config = self.parse_currency_config_from_headers(self.df_original.columns)
             
             # Create a copy for conversion
             self.df = self.df_original.copy()
@@ -253,7 +289,7 @@ def create_net_worth_chart(df):
     fig.update_layout(
         height=600,
         showlegend=False,
-        title_text="Multi-Currency Net Worth Analysis (Converted to EUR)",
+        title_text="Net Worth Analysis (Converted to EUR)",
         title_x=0.5,
         title_font_size=20
     )
@@ -351,7 +387,7 @@ def create_account_trends_chart(df, df_original, currency_config):
 
 def main():
     # Header
-    st.markdown('<h1 class="main-header">💰 Multi-Currency Net Worth Tracker</h1>', unsafe_allow_html=True)
+    st.markdown('<h1 class="main-header">💰 Net Worth Tracker</h1>', unsafe_allow_html=True)
     
     # Welcome message for clean start
     if 'analyzer' not in st.session_state and 'uploaded_file' not in st.session_state:
@@ -366,113 +402,52 @@ def main():
         """, unsafe_allow_html=True)
     
     # File upload section
-    st.markdown("### 📁 Data Source")
-    
-    # Create tabs for different data input methods
-    tab1, tab2 = st.tabs(["📤 Upload CSV File", "📂 Use Local File"])
+    st.markdown("### 📁 Upload Your CSV File")
     
     analyzer = None
     
-    with tab1:
-        st.markdown("Upload your CSV file containing net worth data:")
-        uploaded_file = st.file_uploader(
-            "Choose a CSV file",
-            type="csv",
-            help="Upload a CSV file with Date column and account balances"
-        )
-        
-        if uploaded_file is not None:
-            # Store uploaded file in session state
-            st.session_state['uploaded_file'] = uploaded_file
-            st.session_state['uploaded_file_name'] = uploaded_file.name
-            
-            # Display file info
-            st.success(f"✅ File uploaded: {uploaded_file.name}")
-            
-            # Preview the data
-            try:
-                preview_df = pd.read_csv(uploaded_file)
-                st.markdown("**📊 Data Preview:**")
-                st.dataframe(preview_df.head(), use_container_width=True)
-                
-                # Store column info for later use
-                st.session_state['account_columns'] = [col for col in preview_df.columns if col.lower() != 'date']
-                
-                st.info("👇 Scroll down to configure currencies and process your data")
-                
-            except Exception as e:
-                st.error(f"Error reading file: {str(e)}")
-                st.info("Please ensure your CSV file has the correct format with Date column and account balances.")
+    st.markdown("Upload your CSV file containing net worth data:")
+    uploaded_file = st.file_uploader(
+        "Choose a CSV file",
+        type="csv",
+        help="Upload a CSV file with Date column and account balances"
+    )
     
-    with tab2:
-        st.markdown("Use a local file (for development/testing):")
+    if uploaded_file is not None:
+        # Store uploaded file in session state
+        st.session_state['uploaded_file'] = uploaded_file
+        st.session_state['uploaded_file_name'] = uploaded_file.name
         
-        # Default currency configuration
-        default_currency_config = {
-            'UBS Account': 'CHF',
-            'IBKR Account': 'CHF', 
-            'Kutxabank Account': 'EUR'
-        }
+        # Display file info
+        st.success(f"✅ File uploaded: {uploaded_file.name}")
         
-        # Check if default file exists but don't auto-load
-        default_data_path = "data/net_worth_data.csv"
-        if os.path.exists(default_data_path):
-            st.info(f"📁 Local file found: {default_data_path}")
-            if st.button("📂 Load Local File", type="secondary"):
-                analyzer = MultiCurrencyNetWorthAnalyzer(default_data_path, default_currency_config, is_file_upload=False)
-                if analyzer.df is not None:
-                    st.session_state['analyzer'] = analyzer
-                    st.success("✅ Local file loaded successfully!")
-                    st.rerun()
-        else:
-            st.warning(f"⚠️ Local file not found: {default_data_path}")
-            st.markdown("""
-            **To use local file:**
-            1. Create a `data` folder in your project directory
-            2. Add `net_worth_data.csv` file with your data
-            3. Refresh this page
-            """)
-    
-    # Currency Configuration Section (moved to bottom for better UX)
-    if 'uploaded_file' in st.session_state and 'account_columns' in st.session_state:
-        st.markdown("---")
-        st.markdown("### 💱 Currency Configuration")
-        st.markdown(f"Configure currencies for **{st.session_state['uploaded_file_name']}**:")
-        
-        account_columns = st.session_state['account_columns']
-        currency_config = {}
-        
-        # Create currency selectors in a more compact layout
-        cols = st.columns(min(3, len(account_columns)))
-        for i, account in enumerate(account_columns):
-            with cols[i % len(cols)]:
-                currency_config[account] = st.selectbox(
-                    f"{account}",
-                    ["EUR", "CHF", "USD", "GBP", "JPY", "CAD", "AUD"],
-                    key=f"currency_{account}",
-                    index=1 if "UBS" in account or "IBKR" in account else 0,
-                    help=f"Select currency for {account}"
-                )
-        
-        # Process button
-        if st.button("🚀 Process Data with Selected Currencies", type="primary"):
+        # Process the file immediately if not already processed
+        if 'analyzer' not in st.session_state or st.session_state.get('processed_file') != uploaded_file.name:
             try:
-                # Get the uploaded file from session state
-                uploaded_file = st.session_state['uploaded_file']
                 uploaded_file.seek(0)  # Reset file pointer
-                analyzer = MultiCurrencyNetWorthAnalyzer(uploaded_file, currency_config, is_file_upload=True)
+                analyzer = MultiCurrencyNetWorthAnalyzer(uploaded_file, is_file_upload=True)
                 
                 if analyzer.df is not None:
-                    st.success("✅ Data processed successfully with currency conversions!")
+                    st.success("✅ Data processed successfully! Currency configuration detected from headers:")
+                    
+                    # Show detected currencies
+                    currency_info = []
+                    for col, currency in analyzer.currency_config.items():
+                        if col.lower() != 'date':
+                            currency_info.append(f"• **{col}**: {currency}")
+                    st.markdown("\n".join(currency_info))
+                    
                     # Store analyzer in session state for persistence
                     st.session_state['analyzer'] = analyzer
+                    st.session_state['processed_file'] = uploaded_file.name
                     st.rerun()
                 else:
                     st.error("❌ Error processing data. Please check your file format.")
             except Exception as e:
                 st.error(f"Error processing data: {str(e)}")
+                st.info("Please ensure your CSV file has headers with currency codes like 'Account Name (CHF)' or 'Account Name CHF'.")
         else:
-            st.info("👆 Configure currencies above and click 'Process Data' to continue with analysis")
+            st.info("✅ File already processed. Data is ready for analysis.")
     
     # Check if we have an analyzer from session state
     if 'analyzer' in st.session_state:
@@ -484,13 +459,13 @@ def main():
         
         # Show expected CSV format
         st.markdown("### 📋 Expected CSV Format")
-        st.markdown("Your CSV file should have the following structure:")
+        st.markdown("Your CSV file should have the following structure with currency codes in headers:")
         
         sample_data = {
             'Date': ['2024-10-31', '2024-11-30', '2024-12-31'],
-            'Account 1': [1000.00, 1050.00, 1100.00],
-            'Account 2': [5000.00, 5200.00, 5400.00],
-            'Account 3': [2000.00, 2100.00, 2150.00]
+            'Bank Account (EUR)': [1000.00, 1050.00, 1100.00],
+            'Investment Account (CHF)': [5000.00, 5200.00, 5400.00],
+            'Savings Account (USD)': [2000.00, 2100.00, 2150.00]
         }
         sample_df = pd.DataFrame(sample_data)
         st.dataframe(sample_df, use_container_width=True)
@@ -498,8 +473,10 @@ def main():
         st.markdown("""
         **Requirements:**
         - `Date` column in YYYY-MM-DD format (last day of month)
-        - Account columns with numeric values
-        - Monthly data points
+        - Account columns with currency codes in parentheses: `Account Name (CHF)` or `Account Name CHF`
+        - Supported currencies: EUR, CHF, USD, GBP, JPY, CAD, AUD
+        - Monthly data points with numeric values
+        - Currency codes will be automatically detected from column headers
         """)
         return
     
@@ -526,7 +503,7 @@ def main():
     # Clear data button
     if st.sidebar.button("🗑️ Clear Data & Start Over"):
         # Clear all session state related to uploaded files and analyzer
-        keys_to_clear = ['uploaded_file', 'uploaded_file_name', 'account_columns', 'analyzer']
+        keys_to_clear = ['uploaded_file', 'uploaded_file_name', 'analyzer', 'processed_file']
         for key in keys_to_clear:
             if key in st.session_state:
                 del st.session_state[key]
@@ -534,7 +511,7 @@ def main():
     
     page = st.sidebar.selectbox(
         "Choose a view:",
-        ["📈 Dashboard", "🔍 Detailed Analysis", "📊 Account Trends", "📋 Data View", "💱 Currency Settings"]
+        ["📈 Dashboard", "🔍 Detailed Analysis", "📊 Account Trends", "📋 Data View"]
     )
     
     # Get summary statistics
@@ -753,62 +730,12 @@ def main():
                 mime="text/csv"
             )
     
-    elif page == "💱 Currency Settings":
-        st.header("💱 Currency Configuration")
-        
-        st.markdown("""
-        Configure which currency each account uses. The app will automatically convert 
-        all amounts to EUR using real-time exchange rates from Yahoo Finance.
-        """)
-        
-        # Current configuration
-        st.subheader("📊 Current Configuration")
-        config_df = pd.DataFrame([
-            {'Account': account, 'Currency': currency}
-            for account, currency in analyzer.currency_config.items()
-        ])
-        st.dataframe(config_df, hide_index=True, use_container_width=True)
-        
-        # Supported currencies
-        st.subheader("🌍 Supported Currencies")
-        st.markdown("""
-        - **CHF** - Swiss Franc
-        - **EUR** - Euro
-        - **USD** - US Dollar
-        - **GBP** - British Pound
-        - **JPY** - Japanese Yen
-        - **CAD** - Canadian Dollar
-        - **AUD** - Australian Dollar
-        - And many more...
-        """)
-        
-        # Exchange rate test
-        st.subheader("🧪 Test Exchange Rate")
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            test_from = st.selectbox("From Currency", ["CHF", "USD", "GBP", "JPY", "CAD", "AUD"])
-        
-        with col2:
-            test_to = st.selectbox("To Currency", ["EUR", "CHF", "USD", "GBP", "JPY", "CAD", "AUD"], index=0)
-        
-        with col3:
-            test_amount = st.number_input("Amount", value=100.0, min_value=0.01)
-        
-        if st.button("Get Exchange Rate"):
-            test_converter = CurrencyConverter()
-            rate = test_converter.get_exchange_rate(test_from, test_to)
-            converted_amount = test_amount * rate
-            
-            st.success(f"{test_amount:,.2f} {test_from} = {converted_amount:,.2f} {test_to}")
-            st.info(f"Exchange Rate: 1 {test_from} = {rate:.4f} {test_to}")
-    
     # Footer
     st.markdown("---")
     st.markdown(
         "<div style='text-align: center; color: #888; padding: 1rem;'>"
         "💡 <strong>Tip:</strong> Exchange rates are fetched in real-time from Yahoo Finance. "
-        "Update your CSV file monthly with new data to track your financial progress across currencies!"
+        "Include currency codes in your CSV headers (e.g., 'Account Name (CHF)') for automatic detection!"
         "</div>",
         unsafe_allow_html=True
     )
