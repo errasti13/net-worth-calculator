@@ -11,7 +11,7 @@ from typing import Dict, Optional
 
 # Page configuration
 st.set_page_config(
-    page_title="Multi-Currency Net Worth Tracker",
+    page_title="Net Worth Tracker",
     page_icon="💰",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -370,6 +370,10 @@ def main():
         )
         
         if uploaded_file is not None:
+            # Store uploaded file in session state
+            st.session_state['uploaded_file'] = uploaded_file
+            st.session_state['uploaded_file_name'] = uploaded_file.name
+            
             # Display file info
             st.success(f"✅ File uploaded: {uploaded_file.name}")
             
@@ -379,29 +383,10 @@ def main():
                 st.markdown("**📊 Data Preview:**")
                 st.dataframe(preview_df.head(), use_container_width=True)
                 
-                # Reset file pointer for actual use
-                uploaded_file.seek(0)
+                # Store column info for later use
+                st.session_state['account_columns'] = [col for col in preview_df.columns if col.lower() != 'date']
                 
-                # Currency configuration based on detected columns
-                st.markdown("### 💱 Currency Configuration")
-                st.markdown("Configure the currency for each account:")
-                
-                account_columns = [col for col in preview_df.columns if col.lower() != 'date']
-                currency_config = {}
-                
-                # Create currency selectors
-                col1, col2 = st.columns(2)
-                for i, account in enumerate(account_columns):
-                    with col1 if i % 2 == 0 else col2:
-                        currency_config[account] = st.selectbox(
-                            f"Currency for {account}",
-                            ["EUR", "CHF", "USD", "GBP", "JPY", "CAD", "AUD"],
-                            key=f"currency_{account}",
-                            index=1 if "UBS" in account or "IBKR" in account else 0
-                        )
-                
-                # Initialize analyzer with uploaded file
-                analyzer = MultiCurrencyNetWorthAnalyzer(uploaded_file, currency_config, is_file_upload=True)
+                st.info("👇 Scroll down to configure currencies and process your data")
                 
             except Exception as e:
                 st.error(f"Error reading file: {str(e)}")
@@ -430,6 +415,51 @@ def main():
             2. Add `net_worth_data.csv` file with your data
             3. Refresh this page
             """)
+    
+    # Currency Configuration Section (moved to bottom for better UX)
+    if 'uploaded_file' in st.session_state and 'account_columns' in st.session_state:
+        st.markdown("---")
+        st.markdown("### 💱 Currency Configuration")
+        st.markdown(f"Configure currencies for **{st.session_state['uploaded_file_name']}**:")
+        
+        account_columns = st.session_state['account_columns']
+        currency_config = {}
+        
+        # Create currency selectors in a more compact layout
+        cols = st.columns(min(3, len(account_columns)))
+        for i, account in enumerate(account_columns):
+            with cols[i % len(cols)]:
+                currency_config[account] = st.selectbox(
+                    f"{account}",
+                    ["EUR", "CHF", "USD", "GBP", "JPY", "CAD", "AUD"],
+                    key=f"currency_{account}",
+                    index=1 if "UBS" in account or "IBKR" in account else 0,
+                    help=f"Select currency for {account}"
+                )
+        
+        # Process button
+        if st.button("🚀 Process Data with Selected Currencies", type="primary"):
+            try:
+                # Get the uploaded file from session state
+                uploaded_file = st.session_state['uploaded_file']
+                uploaded_file.seek(0)  # Reset file pointer
+                analyzer = MultiCurrencyNetWorthAnalyzer(uploaded_file, currency_config, is_file_upload=True)
+                
+                if analyzer.df is not None:
+                    st.success("✅ Data processed successfully with currency conversions!")
+                    # Store analyzer in session state for persistence
+                    st.session_state['analyzer'] = analyzer
+                    st.rerun()
+                else:
+                    st.error("❌ Error processing data. Please check your file format.")
+            except Exception as e:
+                st.error(f"Error processing data: {str(e)}")
+        else:
+            st.info("👆 Configure currencies above and click 'Process Data' to continue with analysis")
+    
+    # Check if we have an analyzer from session state
+    if 'analyzer' in st.session_state:
+        analyzer = st.session_state['analyzer']
     
     # Only proceed if we have a valid analyzer
     if analyzer is None or analyzer.df is None:
@@ -475,6 +505,16 @@ def main():
     
     # Sidebar
     st.sidebar.header("📊 Navigation")
+    
+    # Clear data button
+    if st.sidebar.button("🗑️ Clear Data & Start Over"):
+        # Clear all session state related to uploaded files and analyzer
+        keys_to_clear = ['uploaded_file', 'uploaded_file_name', 'account_columns', 'analyzer']
+        for key in keys_to_clear:
+            if key in st.session_state:
+                del st.session_state[key]
+        st.rerun()
+    
     page = st.sidebar.selectbox(
         "Choose a view:",
         ["📈 Dashboard", "🔍 Detailed Analysis", "📊 Account Trends", "📋 Data View", "💱 Currency Settings"]
