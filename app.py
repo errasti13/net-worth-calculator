@@ -353,6 +353,18 @@ def main():
     # Header
     st.markdown('<h1 class="main-header">💰 Multi-Currency Net Worth Tracker</h1>', unsafe_allow_html=True)
     
+    # Welcome message for clean start
+    if 'analyzer' not in st.session_state and 'uploaded_file' not in st.session_state:
+        st.markdown("""
+        <div style='text-align: center; padding: 2rem; background-color: #f8f9fa; border-radius: 10px; margin: 1rem 0;'>
+            <h3 style='color: #1f77b4; margin-bottom: 1rem;'>Welcome to Your Personal Net Worth Tracker!</h3>
+            <p style='font-size: 1.1rem; margin-bottom: 0;'>
+                Track your finances across multiple currencies with real-time exchange rates.<br>
+                Start by uploading your CSV file or using a local file below.
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+    
     # File upload section
     st.markdown("### 📁 Data Source")
     
@@ -402,11 +414,16 @@ def main():
             'Kutxabank Account': 'EUR'
         }
         
-        # Check if default file exists
+        # Check if default file exists but don't auto-load
         default_data_path = "data/net_worth_data.csv"
         if os.path.exists(default_data_path):
-            st.info(f"✅ Using local file: {default_data_path}")
-            analyzer = MultiCurrencyNetWorthAnalyzer(default_data_path, default_currency_config, is_file_upload=False)
+            st.info(f"📁 Local file found: {default_data_path}")
+            if st.button("📂 Load Local File", type="secondary"):
+                analyzer = MultiCurrencyNetWorthAnalyzer(default_data_path, default_currency_config, is_file_upload=False)
+                if analyzer.df is not None:
+                    st.session_state['analyzer'] = analyzer
+                    st.success("✅ Local file loaded successfully!")
+                    st.rerun()
         else:
             st.warning(f"⚠️ Local file not found: {default_data_path}")
             st.markdown("""
